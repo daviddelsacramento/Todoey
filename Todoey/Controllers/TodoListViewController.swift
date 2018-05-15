@@ -7,23 +7,19 @@
 //
 
 import UIKit
-import CoreData
+import RealmSwift
 
 class TodoListViewController: UITableViewController {
 
-    var itemArray = [Item]()
+    var todoItems: Results<Item>?
+    let realm = try! Realm()
     
     var selectedCategory : Category? {
         didSet{
             loadItems()
         }
     }
-    
-    //let defaults = UserDefaults.standard
 
-    
-    let context = (UIApplication.shared.delegate as! AppDelegate).persistentContainer.viewContext
-    
     override func viewDidLoad() {
         super.viewDidLoad()
 
@@ -43,19 +39,21 @@ class TodoListViewController: UITableViewController {
         
         let cell = tableView.dequeueReusableCell(withIdentifier: "ToDoItemCell", for: indexPath)
         
-        let item = itemArray[indexPath.row]
-        
-        cell.textLabel?.text = item.title
-        
-        cell.accessoryType = item.done == true ? .checkmark : .none
-        
+        if let item = todoItems?[indexPath.row] {
+            cell.textLabel?.text = item.title
+            
+            cell.accessoryType = item.done == true ? .checkmark : .none
+        } else {
+            cell.textLabel?.text = "No Item added yet"
+        }
+
         return cell
         
     }
     
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         
-        return itemArray.count
+        return todoItems?.count ?? 1
         
     }
     
@@ -64,21 +62,17 @@ class TodoListViewController: UITableViewController {
     
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         
-        //print(itemArray[indexPath.row])
+        if let item = todoItems?[indexPath.row] {
+            do {
+                try realm.write {
+                    item.done = !item.done
+                }
+            } catch {
+                print("Error saving done value, \(error)")
+            }
+        }
         
-        itemArray[indexPath.row].done = !itemArray[indexPath.row].done
-        
-        //context.delete(itemArray[indexPath.row])
-        //itemArray.remove(at: indexPath.row)
-        
-        saveItems()
-        
-        
-//        if tableView.cellForRow(at: indexPath)?.accessoryType == .checkmark {
-//            tableView.cellForRow(at: indexPath)?.accessoryType = .none
-//        } else {
-//            tableView.cellForRow(at: indexPath)?.accessoryType = .checkmark
-//        }
+        tableView.reloadData()
         
         tableView.deselectRow(at: indexPath, animated: true)
         
@@ -97,17 +91,20 @@ class TodoListViewController: UITableViewController {
         let action = UIAlertAction(title: "Add Item", style: .default) { (action) in
             //Esto es lo que se ejecuta cuando el usuairo hace click en Add Item
 
-            let newItem = Item(context: self.context)
+            if let currentCategory = self.selectedCategory {
+                do {
+                    try self.realm.write {
+                        let newItem = Item()
+                        newItem.title = textField.text!
+                        newItem.dateCreated = Date()
+                        currentCategory.items.append(newItem)
+                    }
+                } catch {
+                    print("Error saving Item \(error)")
+                }
+            }
+            self.tableView.reloadData()
             
-            newItem.title = textField.text!
-            newItem.done = false
-            newItem.parentCategory = self.selectedCategory
-            self.itemArray.append(newItem)
-            
-            //Esto crash por que estamos usando custom types
-            //self.defaults.set(self.itemArray, forKey: "TodoListArray")
-            
-            self.saveItems()
         }
         
         alert.addTextField { (alertTextField) in
@@ -124,37 +121,13 @@ class TodoListViewController: UITableViewController {
     
     //MARK: - Model Manipulation Methods
     
-    func saveItems() {
-
-        
-        do {
-           try context.save()
-        } catch {
-           print("Error saving context \(error)")
-        }
-        
-        self.tableView.reloadData()
-    }
     
-    func loadItems(with request: NSFetchRequest<Item> = Item.fetchRequest(), predicate: NSPredicate? = nil) {
+    func loadItems() {
         
-        let categoryPredicate = NSPredicate(format: "parentCategory.name MATCHES %@", selectedCategory!.name!)
+        todoItems = selectedCategory?.items.sorted(byKeyPath: "title", ascending: true)
 
-        if let additionalPredicate = predicate {
-            request.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [categoryPredicate, additionalPredicate])
-        } else {
-            request.predicate = categoryPredicate
-        }
-        
-        
-        do {
-            itemArray = try context.fetch(request)
-        } catch {
-            print("Error fetching data from context \(error)")
-        }
-        
         tableView.reloadData()
-        
+
     }
 
 }
@@ -162,29 +135,26 @@ class TodoListViewController: UITableViewController {
 
 //MARK: - Search Bar Methods
 extension TodoListViewController: UISearchBarDelegate {
-    
-    
+
+
     func searchBarSearchButtonClicked(_ searchBar: UISearchBar) {
-        let request : NSFetchRequest<Item> = Item.fetchRequest()
-
-        let predicate = NSPredicate(format: "title CONTAINS[cd] %@", searchBar.text!)
         
-        request.sortDescriptors = [NSSortDescriptor(key: "title", ascending: true)]
+        todoItems = todoItems?.filter("title CONTAINS[cd] %@", searchBar.text!).sorted(byKeyPath: "dateCreated", ascending: true)
         
-        loadItems(with: request, predicate: predicate)
-
+        tableView.reloadData()
+        
     }
-    
+
     func searchBar(_ searchBar: UISearchBar, textDidChange searchText: String) {
         if searchBar.text?.count == 0 {
             loadItems()
-            
+
             DispatchQueue.main.async {
                 searchBar.resignFirstResponder()
             }
-            
+
         }
     }
-    
+
 }
 
